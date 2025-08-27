@@ -4,12 +4,14 @@
 \alias{st_write_parquet}
 \title{Write \code{sf} object to Parquet file}
 \usage{
-st_write_parquet(obj, dsn, ...)
+st_write_parquet(obj, dsn, compression = "zstd", ...)
 }
 \arguments{
 \item{obj}{object of class \code{\link[sf]{sf}}}
 
 \item{dsn}{data source name. A path and file name with .parquet extension}
+
+\item{compression}{algorithm. Default "zstd", recommended for geoparquet}
 
 \item{...}{additional options to pass to \code{\link[arrow]{write_parquet}}}
 }

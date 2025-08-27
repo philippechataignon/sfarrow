@@ -9,31 +9,24 @@
 #' @return JSON formatted list with geo-metadata
 #' @keywords internal
 create_metadata <- function(df){
-  warning(strwrap("This is an initial implementation of Parquet/Feather file support
-                  and geo metadata. This is tracking version 0.1.0 of the metadata
-                  (https://github.com/geopandas/geo-arrow-spec). This metadata
-                  specification may change and does not yet make stability promises.
-                  We do not yet recommend using this in a production setting unless
-                  you are able to rewrite your Parquet/Feather files.",
-                  prefix = "\n", initial = ""
-         ), call.=FALSE)
-
   # reference: https://github.com/geopandas/geo-arrow-spec
   geom_cols <- lapply(df, function(i) inherits(i, "sfc"))
   geom_cols <- names(which(geom_cols==TRUE))
   col_meta <- list()
 
   for(col in geom_cols){
-    col_meta[[col]] <- list(crs = sf::st_crs(df[[col]])$wkt,
-                            encoding = "WKB",
-                            bbox = as.numeric(sf::st_bbox(df[[col]])))
+    col_meta[[col]] <- list(
+      crs = jsonlite::fromJSON(sf::st_as_text(sf::st_crs(df[[col]]), projjson=T)),
+      encoding = "WKB",
+      geometry_types = list()
+    )
   }
-
-  geo_metadata <- list(primary_column = attr(df, "sf_column"),
-                       columns = col_meta,
-                       schema_version = "0.1.0",
-                       creator = list(library="sfarrow"))
-
+  geo_metadata <- list(
+    primary_column = attr(df, "sf_column"),
+    columns = col_meta,
+    version = "1.1.0",
+    creator = list(library="sfarrow")
+  )
   return(jsonlite::toJSON(geo_metadata, auto_unbox=TRUE))
 }
 
@@ -73,7 +66,6 @@ validate_metadata <- function(metadata){
     }
   }
 }
-
 
 #' Convert \code{sfc} geometry columns into a WKB binary format
 #'
@@ -118,10 +110,17 @@ arrow_to_sf <- function(tbl, metadata){
   }
 
   for(col in geom_cols){
-    tbl[[col]] <- sf::st_as_sfc(tbl[[col]],
-                                crs = sf::st_crs(metadata$columns[[col]]$crs))
+    tbl[[col]] <- sf::st_as_sfc(
+      tbl[[col]],
+      crs = sf::st_crs(
+        paste0(
+          metadata$columns[[col]]$crs$id$authority,
+          ":",
+          metadata$columns[[col]]$crs$id$code
+        )
+      )
+    )
   }
-
   tbl <- sf::st_sf(tbl, sf_column_name = primary_geom)
   return(tbl)
 }
@@ -184,12 +183,11 @@ st_read_parquet <- function(dsn, col_select = NULL,
   }
 
   # covert and create sf
-  tbl <- data.frame(tbl)
+  tbl <- tibble::as_tibble(tbl)
   tbl <- arrow_to_sf(tbl, geo)
 
   return(tbl)
 }
-
 
 #' Read a Feather file to \code{sf} object
 #'
@@ -224,7 +222,6 @@ st_read_feather <- function(dsn, col_select = NULL, ...){
   if(missing(dsn)){
     stop("Please provide a data source")
   }
-
   f <- arrow::read_feather(dsn, col_select, as_data_frame = FALSE, ...)
   schema <- f$schema
   metadata <- schema$metadata
@@ -252,6 +249,7 @@ st_read_feather <- function(dsn, col_select = NULL, ...){
 #'
 #' @param obj object of class \code{\link[sf]{sf}}
 #' @param dsn data source name. A path and file name with .parquet extension
+#' @param compression algorithm. Default "zstd", recommended for geoparquet
 #' @param ... additional options to pass to \code{\link[arrow]{write_parquet}}
 #'
 #' @return \code{obj} invisibly
@@ -274,7 +272,7 @@ st_read_feather <- function(dsn, col_select = NULL, ...){
 #' nc_p <- st_read_parquet(tf)
 #'
 #' @export
-st_write_parquet <- function(obj, dsn, ...){
+st_write_parquet <- function(obj, dsn, compression = "zstd", ...){
   if(!inherits(obj, "sf")){
     stop("Must be sf data format")
   }
@@ -290,11 +288,10 @@ st_write_parquet <- function(obj, dsn, ...){
 
   tbl$metadata[["geo"]] <- geo_metadata
 
-  arrow::write_parquet(tbl, sink = dsn, ...)
+  arrow::write_parquet(tbl, sink = dsn, compression = compression, ...)
 
   invisible(obj)
 }
-
 
 #' Write \code{sf} object to Feather file
 #'
@@ -407,8 +404,10 @@ read_sf_dataset <- function(dataset, find_geom = FALSE){
 
   if(inherits(dataset, "arrow_dplyr_query")){
     metadata <- dataset$.data$metadata
-  } else{
+  } else if (inherits(dataset, "Dataset")) {
     metadata <- dataset$metadata
+  } else {
+    stop("dataset must be	a Dataset object created by arrow::open_dataset or an arrow_dplyr_query")
   }
 
   if(!"geo" %in% names(metadata)){
@@ -420,16 +419,16 @@ read_sf_dataset <- function(dataset, find_geom = FALSE){
 
   if(find_geom){
     geom_cols <- names(geo$columns)
-    dataset <- dplyr::select(dataset$.data$clone(),
-                             c(names(dataset), geom_cols))
+    dataset <- dplyr::select(
+      dataset$.data$clone(),
+      c(names(dataset), geom_cols)
+    )
   }
 
   # execute query, or read dataset connection
   tbl <- dplyr::collect(dataset)
   tbl <- data.frame(tbl)
-
   tbl <- arrow_to_sf(tbl, geo)
-
   return(tbl)
 }
 
@@ -485,11 +484,13 @@ read_sf_dataset <- function(dataset, find_geom = FALSE){
 #' plot(sf::st_geometry(nc_d))
 #'
 #' @export
-write_sf_dataset <- function(obj, path,
-                             format = "parquet",
-                             partitioning = dplyr::group_vars(obj),
-                             ...){
-
+write_sf_dataset <- function(
+    obj,
+    path,
+    format = "parquet",
+    partitioning = dplyr::group_vars(obj),
+    ...)
+{
   if(!inherits(obj, "sf")){
     stop("Must be an sf data format. Use arrow::write_dataset instead")
   }
@@ -511,11 +512,12 @@ write_sf_dataset <- function(obj, path,
   tbl <- arrow::Table$create(dataset)
   tbl$metadata[["geo"]] <- geo_metadata
 
-  arrow::write_dataset(dataset=tbl,
-                       path = path,
-                       format = format,
-                       partitioning = partitioning,
-                       ...)
-
+  arrow::write_dataset(
+    dataset=tbl,
+    path = path,
+    format = format,
+    partitioning = partitioning,
+    ...
+  )
   invisible(obj)
 }

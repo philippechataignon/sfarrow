@@ -1,5 +1,6 @@
-^sfarrow\.Rproj$
+^.*\.Rproj$
 ^\.Rproj\.user$
+^\.jj$
 ^README\.Rmd$
 ^docs$
 ^cran-comments\.md$

@@ -3,7 +3,7 @@ title: "Getting started examples"
 output: rmarkdown::html_vignette
 description: Reading/writing with sfarrow and how it works.
 vignette: >
-  %\VignetteIndexEntry{example_sfarrow}
+  %\VignetteIndexEntry{Getting started examples}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -101,7 +101,6 @@ an `sf` object.
 
 ```{r}
 nc_ds <- read_sf_dataset(ds)
-
 nc_ds
 ```
 
@@ -114,8 +113,8 @@ process the Arrow Table into `sf`.
 
 ```{r, tidy=FALSE}
 nc_d12 <- ds %>% 
-            filter(split1 == 1, split2 == 2) %>%
-            read_sf_dataset()
+  filter(continent == "Africa") |> 
+  read_sf_dataset()
 
 nc_d12
 plot(sf::st_geometry(nc_d12), col="grey")
@@ -137,8 +136,8 @@ metadata, in addition to the selected columns.
 
 # set find_geom
 nc_sub <- ds %>%
-            select('FIPS') %>% # subset of columns
-            read_sf_dataset(find_geom = TRUE)
+  select('name') %>% # subset of columns
+  read_sf_dataset(find_geom = TRUE)
 
 nc_sub
 ```
